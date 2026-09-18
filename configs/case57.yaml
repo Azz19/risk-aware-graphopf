@@ -1,0 +1,14 @@
+case:
+  name: pglib_opf_case57_ieee
+  path: ../pglib-opf/pglib_opf_case57_ieee.m
+
+solver:
+  opf_verbose: false
+  pf_tolerance_mva: 1.0e-6
+  feasibility_tolerance: 1.0e-6
+
+renewables:
+  penetration: 0.20
+  n_sites: 6
+  seed: 1907
+  placement: highest_load_buses
