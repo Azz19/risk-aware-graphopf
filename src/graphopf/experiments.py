@@ -52,13 +52,17 @@ def apply_scenario(base_opf, renewable_buses, forecast, error, participation):
     ppc = copy.deepcopy(base_opf)
     bus_lookup = {int(row[BUS_I]): i for i, row in enumerate(ppc["bus"])}
 
-    # Forecast renewable injection is represented as negative active demand.
+    # base_opf already contains the forecast renewable injection.
+    # Therefore each stochastic scenario must apply ONLY the forecast error.
+    # Subtracting the full realized renewable injection here would double-count
+    # the forecast and make even the zero-error scenario infeasible.
     realized = np.maximum(forecast + error, 0.0)
-    for bus_id, injection in zip(renewable_buses, realized):
-        ppc["bus"][bus_lookup[int(bus_id)], PD] -= injection
+    effective_error = realized - forecast
+    for bus_id, delta in zip(renewable_buses, effective_error):
+        ppc["bus"][bus_lookup[int(bus_id)], PD] -= delta
 
-    # AGC balances total forecast error around the forecast dispatch.
-    mismatch = float(error.sum())
+    # AGC balances the realized net renewable error around forecast dispatch.
+    mismatch = float(effective_error.sum())
     ppc["gen"][:, PG] -= participation * mismatch
     return ppc
 
