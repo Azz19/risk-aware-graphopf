@@ -50,6 +50,24 @@ def main():
     std = float(cfg["uncertainty"]["relative_sigma"]) * forecast
     df = float(cfg["uncertainty"]["student_df"])
 
+    # Invariant: zero renewable forecast error must reproduce a feasible
+    # forecast operating point (up to the configured numerical tolerance).
+    tol = float(cfg["evaluation"]["feasibility_tolerance"])
+    zero_scenario = apply_scenario(
+        opf, buses, forecast, np.zeros_like(forecast), participation
+    )
+    zero_result, zero_converged = run_pf_scenario(zero_scenario)
+    if not zero_converged:
+        raise RuntimeError("Zero-error invariant failed: AC power flow did not converge")
+    zero_metrics = evaluate_constraints(zero_result, tol)
+    print("Zero-error invariant:")
+    print(json.dumps(zero_metrics, indent=2))
+    if not zero_metrics["operational_feasible"]:
+        raise RuntimeError(
+            "Zero-error invariant failed: forecast operating point is classified "
+            "as infeasible after AC power flow. Do not run Monte Carlo until fixed."
+        )
+
     all_rows = []
     summaries = []
     for family_index, family in enumerate(cfg["uncertainty"]["distributions"]):
@@ -62,7 +80,7 @@ def main():
             scenario = apply_scenario(opf, buses, forecast, error, participation)
             result, converged = run_pf_scenario(scenario)
             if converged:
-                m = evaluate_constraints(result, float(cfg["evaluation"]["feasibility_tolerance"]))
+                m = evaluate_constraints(result, tol)
             else:
                 nonconverged += 1
                 m = {
@@ -84,12 +102,21 @@ def main():
         all_rows.extend(rows)
         rate = violations / n
         lo, hi = wilson_interval(violations, n, float(cfg["evaluation"]["confidence_level"]))
+        frame = pd.DataFrame(rows)
         summaries.append({
             "family": family,
             "n": n,
             "joint_violation_rate": rate,
             "ci_low": lo,
             "ci_high": hi,
+            "voltage_violation_rate": float((frame["max_voltage_violation_pu"] > tol).mean()),
+            "pg_violation_rate": float((frame["max_pg_violation_mw"] > tol).mean()),
+            "qg_violation_rate": float((frame["max_qg_violation_mvar"] > tol).mean()),
+            "thermal_violation_rate": float((frame["max_thermal_overload_pu"] > tol).mean()),
+            "mean_voltage_violation_pu": float(frame["max_voltage_violation_pu"].mean()),
+            "mean_pg_violation_mw": float(frame["max_pg_violation_mw"].mean()),
+            "mean_qg_violation_mvar": float(frame["max_qg_violation_mvar"].mean()),
+            "mean_thermal_overload_pu": float(frame["max_thermal_overload_pu"].mean()),
             "pf_nonconvergence_rate": nonconverged / n,
         })
 
@@ -100,6 +127,7 @@ def main():
         "renewable_buses": buses.tolist(),
         "renewable_forecast_mw": forecast.tolist(),
         "participation_factors": participation.tolist(),
+        "zero_error_invariant": zero_metrics,
     }
     (outdir / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(pd.DataFrame(summaries).to_string(index=False))
