@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "risk-aware-graphopf"
+version = "0.1.0"
+description = "Reproducible experiments for risk-aware learned AC optimal power flow."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+  "scipy>=1.12,<2",
+  "pandas>=2.2,<3",
+  "matplotlib>=3.8,<4",
+  "networkx>=3.2,<4",
+  "pyyaml>=6.0,<7",
+  "pypower>=5.1.19,<6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "pytest-cov>=5,<7", "ruff>=0.6,<1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
