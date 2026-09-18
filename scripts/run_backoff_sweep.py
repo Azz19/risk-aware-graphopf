@@ -47,6 +47,8 @@ def main():
             continue
 
         active = result["gen"][:, GEN_STATUS] > 0
+        physical_width = forecast_case["gen"][:, PMAX] - forecast_case["gen"][:, PMIN]
+        flexible = active & (physical_width > 1e-6)
         pg = result["gen"][:, PG]
         tightened_pmin = result["gen"][:, PMIN]
         tightened_pmax = result["gen"][:, PMAX]
@@ -70,10 +72,13 @@ def main():
             "solved": solved,
             "objective": float(result["f"]),
             "cost_increase_pct": 100.0 * (float(result["f"]) - base_cost) / base_cost,
-            "min_physical_up_reserve_mw": float(physical_up[active].min()),
-            "min_physical_down_reserve_mw": float(physical_down[active].min()),
-            "total_physical_up_reserve_mw": float(physical_up[active].sum()),
-            "total_physical_down_reserve_mw": float(physical_down[active].sum()),
+            "active_generators": int(active.sum()),
+            "flexible_generators": int(flexible.sum()),
+            "fixed_range_generators": int((active & ~flexible).sum()),
+            "min_physical_up_reserve_mw": float(physical_up[flexible].min()) if flexible.any() else np.nan,
+            "min_physical_down_reserve_mw": float(physical_down[flexible].min()) if flexible.any() else np.nan,
+            "total_physical_up_reserve_mw": float(physical_up[flexible].sum()),
+            "total_physical_down_reserve_mw": float(physical_down[flexible].sum()),
             "min_tightened_up_headroom_mw": float(tight_up[active].min()),
             "min_tightened_down_headroom_mw": float(tight_down[active].min()),
             "generators_at_tightened_pmin": int(np.sum(active & (tight_down <= 1e-6))),
