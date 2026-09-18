@@ -19,6 +19,8 @@ from graphopf.experiments import (
 from graphopf.metrics import wilson_interval
 from graphopf.powerflow import evaluate_constraints, load_case, solve_ac_opf, topological_distance
 from graphopf.uncertainty import exponential_correlation
+from pypower.idx_bus import BUS_TYPE, REF
+from pypower.idx_gen import GEN_BUS, GEN_STATUS, PG, PMAX, PMIN
 
 
 def main():
@@ -78,6 +80,23 @@ def main():
         rows = []
         for s, error in enumerate(errors):
             scenario = apply_scenario(opf, buses, forecast, error, participation)
+
+            active = scenario["gen"][:, GEN_STATUS] > 0
+            pre_pg = scenario["gen"][:, PG].copy()
+            pre_p_violation = np.maximum.reduce([
+                pre_pg - scenario["gen"][:, PMAX],
+                scenario["gen"][:, PMIN] - pre_pg,
+                np.zeros(pre_pg.shape[0]),
+            ])
+            max_pre_pg_violation = float(pre_p_violation[active].max(initial=0.0))
+
+            ref_buses = set(
+                scenario["bus"][scenario["bus"][:, BUS_TYPE] == REF, 0].astype(int)
+            )
+            slack_mask = active & np.isin(
+                scenario["gen"][:, GEN_BUS].astype(int), list(ref_buses)
+            )
+
             result, converged = run_pf_scenario(scenario)
             if converged:
                 m = evaluate_constraints(result, tol)
@@ -92,9 +111,18 @@ def main():
                 }
             joint_violation = not (converged and m["operational_feasible"])
             violations += int(joint_violation)
+            post_pg = result["gen"][:, PG] if converged else np.full_like(pre_pg, np.nan)
+            slack_adjustment = (
+                float(np.sum(post_pg[slack_mask] - pre_pg[slack_mask]))
+                if converged else np.nan
+            )
             rows.append({
                 "family": family,
                 "scenario_id": s,
+                "total_raw_error_mw": float(np.sum(error)),
+                "max_pre_pf_pg_violation_mw": max_pre_pg_violation,
+                "pre_pf_pg_violation": max_pre_pg_violation > tol,
+                "slack_adjustment_mw": slack_adjustment,
                 "pf_converged": converged,
                 "joint_violation": joint_violation,
                 **m,
@@ -110,11 +138,14 @@ def main():
             "ci_low": lo,
             "ci_high": hi,
             "voltage_violation_rate": float((frame["max_voltage_violation_pu"] > tol).mean()),
+            "pre_pf_pg_violation_rate": float(frame["pre_pf_pg_violation"].mean()),
             "pg_violation_rate": float((frame["max_pg_violation_mw"] > tol).mean()),
             "qg_violation_rate": float((frame["max_qg_violation_mvar"] > tol).mean()),
             "thermal_violation_rate": float((frame["max_thermal_overload_pu"] > tol).mean()),
             "mean_voltage_violation_pu": float(frame["max_voltage_violation_pu"].mean()),
+            "mean_pre_pf_pg_violation_mw": float(frame["max_pre_pf_pg_violation_mw"].mean()),
             "mean_pg_violation_mw": float(frame["max_pg_violation_mw"].mean()),
+            "mean_abs_slack_adjustment_mw": float(frame["slack_adjustment_mw"].abs().mean()),
             "mean_qg_violation_mvar": float(frame["max_qg_violation_mvar"].mean()),
             "mean_thermal_overload_pu": float(frame["max_thermal_overload_pu"].mean()),
             "pf_nonconvergence_rate": nonconverged / n,
@@ -128,6 +159,15 @@ def main():
         "renewable_forecast_mw": forecast.tolist(),
         "participation_factors": participation.tolist(),
         "zero_error_invariant": zero_metrics,
+        "nominal_active_generators": int(np.sum(opf["gen"][:, GEN_STATUS] > 0)),
+        "nominal_generators_at_pmin": int(np.sum(
+            (opf["gen"][:, GEN_STATUS] > 0) &
+            (opf["gen"][:, PG] - opf["gen"][:, PMIN] <= tol)
+        )),
+        "nominal_generators_at_pmax": int(np.sum(
+            (opf["gen"][:, GEN_STATUS] > 0) &
+            (opf["gen"][:, PMAX] - opf["gen"][:, PG] <= tol)
+        )),
     }
     (outdir / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(pd.DataFrame(summaries).to_string(index=False))
