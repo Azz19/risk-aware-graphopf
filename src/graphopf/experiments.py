@@ -7,7 +7,7 @@ import numpy as np
 from pypower.api import ppoption, runpf
 from pypower.idx_brch import F_BUS, T_BUS
 from pypower.idx_bus import BUS_I, PD
-from pypower.idx_gen import GEN_BUS, GEN_STATUS, PG, PMAX
+from pypower.idx_gen import GEN_BUS, GEN_STATUS, PG, PMAX, PMIN
 
 from graphopf.powerflow import evaluate_constraints, topological_distance
 from graphopf.uncertainty import exponential_correlation, sample_gaussian, sample_student_t
@@ -25,6 +25,40 @@ def renewable_forecast(ppc: dict, bus_ids: np.ndarray, penetration: float) -> np
     if weights.sum() <= 0:
         weights[:] = 1.0
     return total * weights / weights.sum()
+
+
+def apply_symmetric_generator_backoff(ppc: dict, beta: float) -> dict:
+    """Tighten active-generator P limits by beta of each P operating range."""
+    if not 0.0 <= beta < 0.5:
+        raise ValueError("beta must satisfy 0 <= beta < 0.5")
+    out = copy.deepcopy(ppc)
+    gen = out["gen"]
+    active = gen[:, GEN_STATUS] > 0
+    width = gen[:, PMAX] - gen[:, PMIN]
+    if np.any(width[active] < 0):
+        raise ValueError("PMAX must be >= PMIN for active generators")
+    gen[active, PMIN] += beta * width[active]
+    gen[active, PMAX] -= beta * width[active]
+    return out
+
+
+def directional_participation(opf: dict, mismatch: float) -> np.ndarray:
+    """Participation matched to the required conventional-generation direction.
+
+    mismatch > 0: renewable output exceeds forecast, so conventional generation
+    must move down and participation uses downward reserve (PG - PMIN).
+    mismatch < 0: renewable output is below forecast, so conventional generation
+    must move up and participation uses upward reserve (PMAX - PG).
+    """
+    gen = opf["gen"]
+    active = gen[:, GEN_STATUS] > 0
+    if mismatch >= 0:
+        reserve = np.maximum(gen[:, PG] - gen[:, PMIN], 0.0) * active
+    else:
+        reserve = np.maximum(gen[:, PMAX] - gen[:, PG], 0.0) * active
+    if reserve.sum() <= 0:
+        reserve = active.astype(float)
+    return reserve / reserve.sum()
 
 
 def headroom_participation(opf: dict) -> np.ndarray:
@@ -48,7 +82,7 @@ def generate_errors(kind, rng, n_samples, std, correlation, df):
     raise ValueError(f"Unknown uncertainty family: {kind}")
 
 
-def apply_scenario(base_opf, renewable_buses, forecast, error, participation):
+def apply_scenario(base_opf, renewable_buses, forecast, error, participation=None):
     ppc = copy.deepcopy(base_opf)
     bus_lookup = {int(row[BUS_I]): i for i, row in enumerate(ppc["bus"])}
 
@@ -63,6 +97,8 @@ def apply_scenario(base_opf, renewable_buses, forecast, error, participation):
 
     # AGC balances the realized net renewable error around forecast dispatch.
     mismatch = float(effective_error.sum())
+    if participation is None:
+        participation = directional_participation(base_opf, mismatch)
     ppc["gen"][:, PG] -= participation * mismatch
     return ppc
 
