@@ -6,7 +6,7 @@ experiment:
 
 case:
   name: pglib_opf_case57_ieee
-  path: ../pglib-opf/pglib_opf_case57_ieee.m
+  path: pglib-opf/pglib_opf_case57_ieee.m
 
 renewables:
   penetration: 0.20
