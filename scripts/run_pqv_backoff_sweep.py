@@ -71,6 +71,8 @@ def main():
             continue
 
         active = result["gen"][:, GEN_STATUS] > 0
+        p_width = forecast_case["gen"][:, PMAX] - forecast_case["gen"][:, PMIN]
+        pflex = active & (p_width > 1e-9)
         p_up = forecast_case["gen"][:, PMAX] - result["gen"][:, PG]
         p_down = result["gen"][:, PG] - forecast_case["gen"][:, PMIN]
         q_up = forecast_case["gen"][:, QMAX] - result["gen"][:, QG]
@@ -94,8 +96,8 @@ def main():
             "failure": "",
             "objective": float(result["f"]),
             "cost_increase_pct": 100.0 * (float(result["f"]) - base_cost) / base_cost,
-            "min_physical_p_up_mw": float(p_up[active].min()),
-            "min_physical_p_down_mw": float(p_down[active].min()),
+            "min_physical_p_up_mw": float(p_up[pflex].min()) if pflex.any() else np.nan,
+            "min_physical_p_down_mw": float(p_down[pflex].min()) if pflex.any() else np.nan,
             "min_physical_q_up_mvar": float(q_up[qflex].min()) if qflex.any() else np.nan,
             "min_physical_q_down_mvar": float(q_down[qflex].min()) if qflex.any() else np.nan,
             "min_physical_v_margin_pu": float(np.minimum(physical_v_low, physical_v_high).min()),
