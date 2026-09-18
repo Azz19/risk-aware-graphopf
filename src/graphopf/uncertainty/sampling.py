@@ -57,7 +57,11 @@ def sample_student_t(rng, n_samples: int, std: np.ndarray, df: float, correlatio
     z = rng.standard_normal((n_samples, std.size))
     if correlation is not None:
         z = z @ _factor_correlation(correlation).T
-    chi2 = rng.chisquare(df, size=(n_samples, 1))
+    # Independent marginals require an independent radial scale per site.
+    # With a correlation matrix, use one common radial scale per scenario to
+    # obtain the intended elliptical multivariate Student-t dependence.
+    chi2_shape = (n_samples, std.size) if correlation is None else (n_samples, 1)
+    chi2 = rng.chisquare(df, size=chi2_shape)
     t = z / np.sqrt(chi2 / df)
     t *= np.sqrt((df - 2.0) / df)
     return t * std
