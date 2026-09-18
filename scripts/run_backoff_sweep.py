@@ -48,23 +48,36 @@ def main():
 
         active = result["gen"][:, GEN_STATUS] > 0
         pg = result["gen"][:, PG]
-        pmin = result["gen"][:, PMIN]
-        pmax = result["gen"][:, PMAX]
-        up = pmax - pg
-        down = pg - pmin
-        metrics = evaluate_constraints(result)
+        tightened_pmin = result["gen"][:, PMIN]
+        tightened_pmax = result["gen"][:, PMAX]
+        physical_pmin = forecast_case["gen"][:, PMIN]
+        physical_pmax = forecast_case["gen"][:, PMAX]
+
+        tight_up = tightened_pmax - pg
+        tight_down = pg - tightened_pmin
+        physical_up = physical_pmax - pg
+        physical_down = pg - physical_pmin
+
+        # Evaluate the forecast dispatch against the real equipment limits.
+        physical_result = result.copy()
+        physical_result["gen"] = result["gen"].copy()
+        physical_result["gen"][:, PMIN] = physical_pmin
+        physical_result["gen"][:, PMAX] = physical_pmax
+        metrics = evaluate_constraints(physical_result)
 
         rows.append({
             "beta": beta,
             "solved": solved,
             "objective": float(result["f"]),
             "cost_increase_pct": 100.0 * (float(result["f"]) - base_cost) / base_cost,
-            "min_up_reserve_mw": float(up[active].min()),
-            "min_down_reserve_mw": float(down[active].min()),
-            "total_up_reserve_mw": float(up[active].sum()),
-            "total_down_reserve_mw": float(down[active].sum()),
-            "generators_at_tightened_pmin": int(np.sum(active & (down <= 1e-6))),
-            "generators_at_tightened_pmax": int(np.sum(active & (up <= 1e-6))),
+            "min_physical_up_reserve_mw": float(physical_up[active].min()),
+            "min_physical_down_reserve_mw": float(physical_down[active].min()),
+            "total_physical_up_reserve_mw": float(physical_up[active].sum()),
+            "total_physical_down_reserve_mw": float(physical_down[active].sum()),
+            "min_tightened_up_headroom_mw": float(tight_up[active].min()),
+            "min_tightened_down_headroom_mw": float(tight_down[active].min()),
+            "generators_at_tightened_pmin": int(np.sum(active & (tight_down <= 1e-6))),
+            "generators_at_tightened_pmax": int(np.sum(active & (tight_up <= 1e-6))),
             "operational_feasible": bool(metrics["operational_feasible"]),
         })
 
