@@ -22,3 +22,20 @@ def test_exponential_correlation_is_recovered_empirically():
     target = exponential_correlation(d, 1.5)
     x = sample_gaussian(np.random.default_rng(12), 150_000, np.ones(3), target)
     np.testing.assert_allclose(np.corrcoef(x, rowvar=False), target, atol=0.015)
+
+
+def test_iid_student_t_components_are_independent():
+    x = sample_student_t(
+        np.random.default_rng(13), 200_000, np.ones(3), df=5, correlation=None
+    )
+    corr = np.corrcoef(x, rowvar=False)
+    off_diag = corr - np.eye(3)
+    assert np.max(np.abs(off_diag)) < 0.015
+
+    # Tail events should also be approximately independent, which catches a
+    # shared radial scale that ordinary linear correlation can miss.
+    tail = np.abs(x) > 2.5
+    p0 = tail[:, 0].mean()
+    p1 = tail[:, 1].mean()
+    joint = np.mean(tail[:, 0] & tail[:, 1])
+    assert abs(joint - p0 * p1) < 0.002
