@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
-from pypower.idx_bus import BUS_I, PD, VM
+from pypower.idx_bus import BUS_I, PD, VM, VMIN, VMAX
 from pypower.idx_gen import GEN_BUS, GEN_STATUS, VG, QG, QMAX, QMIN
 from graphopf.experiments import (
     apply_scenario, generate_errors, renewable_forecast,
@@ -68,7 +68,7 @@ def main():
             bus_id = int(modified["gen"][gen_idx, GEN_BUS])
             bidx = lookup[bus_id]
             new_v = float(modified["gen"][gen_idx, VG] + offset)
-            if not (physical["bus"][bidx, 12] >= new_v >= physical["bus"][bidx, 13]):
+            if not (physical["bus"][bidx, VMIN] <= new_v <= physical["bus"][bidx, VMAX]):
                 print(f"skip {label} offset={offset:+.4f}: setpoint outside physical voltage bounds", flush=True)
                 continue
             # Both are set explicitly so PYPOWER initialization and PV control
