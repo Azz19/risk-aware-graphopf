@@ -41,8 +41,8 @@ def load_test_regimes(data,n):
 def active_from_y(y,trig,vmin,tol):return y[:,trig,1]<=vmin+tol
 
 class Gate(nn.Module):
-    def __init__(self,n_bus,hidden):
-        super().__init__();self.net=nn.Sequential(nn.Linear(n_bus*2,hidden),nn.ReLU(),nn.Linear(hidden,hidden),nn.ReLU(),nn.Linear(hidden,1))
+    def __init__(self,n_bus,n_features,hidden):
+        super().__init__();self.net=nn.Sequential(nn.Linear(n_bus*n_features,hidden),nn.ReLU(),nn.Linear(hidden,hidden),nn.ReLU(),nn.Linear(hidden,1))
     def forward(self,x):return self.net(x.flatten(1)).squeeze(-1)
 
 def tensors(x,y,xm,xs,ym,ys,device):
@@ -74,7 +74,7 @@ def predict(m,x,stats,ei,ea,device,batch=128):
 
 def train_gate(tx,lab,vx,vlab,args,device):
     xm=tx.mean((0,1),keepdims=True);xs=np.maximum(tx.std((0,1),keepdims=True),1e-6);TX=torch.tensor((tx-xm)/xs,dtype=torch.float32,device=device);VX=torch.tensor((vx-xm)/xs,dtype=torch.float32,device=device);Y=torch.tensor(lab.astype(np.float32),device=device);VY=torch.tensor(vlab.astype(np.float32),device=device)
-    pos=max(int(lab.sum()),1);pw=torch.tensor([(len(lab)-pos)/pos],device=device);seed_all(args.seed+17);m=Gate(tx.shape[1],args.gate_hidden).to(device);opt=torch.optim.Adam(m.parameters(),lr=args.gate_lr,weight_decay=args.weight_decay);best=float('inf');state=None;stale=0
+    pos=max(int(lab.sum()),1);pw=torch.tensor([(len(lab)-pos)/pos],device=device);seed_all(args.seed+17);m=Gate(tx.shape[1],tx.shape[2],args.gate_hidden).to(device);opt=torch.optim.Adam(m.parameters(),lr=args.gate_lr,weight_decay=args.weight_decay);best=float('inf');state=None;stale=0
     for ep in range(1,args.gate_epochs+1):
         m.train();opt.zero_grad();loss=F.binary_cross_entropy_with_logits(m(TX),Y,pos_weight=pw);loss.backward();opt.step();m.eval()
         with torch.no_grad():vl=F.binary_cross_entropy_with_logits(m(VX),VY,pos_weight=pw).item()
