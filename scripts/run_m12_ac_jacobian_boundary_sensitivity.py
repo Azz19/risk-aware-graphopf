@@ -31,7 +31,8 @@ import numpy as np
 from scipy.sparse import hstack, vstack
 from scipy.sparse.linalg import spsolve
 
-from pypower.api import loadcase, ppoption, runopf
+from pypower.api import ppoption, runopf
+from graphopf.powerflow.case import load_case
 from pypower.bustypes import bustypes
 from pypower.dSbus_dV import dSbus_dV
 from pypower.ext2int import ext2int
@@ -198,7 +199,11 @@ def main():
     cont = continuation_rows(data, te["x"].astype(np.float32))
     paths = sorted(set(r["path"] for r in cont))
     case_path = load_config_case(Path(a.config))
-    base_case = loadcase(str(case_path))
+    base_case = load_case(str(case_path))
+        if not isinstance(base_case, dict):
+    raise RuntimeError(
+        f"Case loader returned {type(base_case).__name__}, expected dict: {case_path}"
+    )
     opt = ppoption(VERBOSE=0, OUT_ALL=0)
 
     print("M12 AC-JACOBIAN / KKT BOUNDARY-SENSITIVITY AUDIT")
