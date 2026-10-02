@@ -53,8 +53,6 @@ def load_npz(path):
 
 
 def load_config_case(config: Path) -> Path:
-    # Avoid adding a YAML dependency to the script logic; the project already
-    # depends on PyYAML, but this keeps the required field explicit.
     import yaml
 
     cfg = yaml.safe_load(config.read_text())
@@ -80,16 +78,7 @@ def continuation_rows(data: Path, test_x: np.ndarray):
             c = int(r["control_scenario"])
             direction = test_x[s].astype(float) - test_x[c].astype(float)
             x = test_x[c].astype(float) + la * direction
-            rows.append(
-                {
-                    "path": s,
-                    "control": c,
-                    "lambda": la,
-                    "x": x,
-                    "direction": direction,
-                    "true_lmp": ff(r.get("true_lmp")),
-                }
-            )
+            rows.append({"path": s, "control": c, "lambda": la, "x": x, "direction": direction, "true_lmp": ff(r.get("true_lmp"))})
     return rows
 
 
@@ -108,12 +97,7 @@ def set_loads(ppc, x, bus_ids):
 
 
 def jacobian_direction(opf_result, direction, bus_ids, trigger_bus):
-    """Return local Newton-PF dV_trigger/dlambda and diagnostics.
-
-    Uses the same reduced Jacobian structure as PYPOWER newtonpf: P equations
-    for PV+PQ buses and Q equations for PQ buses; state variables are their
-    voltage angles and PQ voltage magnitudes.
-    """
+    """Return local Newton-PF dV_trigger/dlambda and diagnostics."""
     r = ext2int(opf_result)
     base = float(r["baseMVA"])
     bus = r["bus"]
@@ -132,8 +116,6 @@ def jacobian_direction(opf_result, direction, bus_ids, trigger_bus):
     J22 = dS_dVm[np.array([pq]).T, pq].imag
     J = vstack([hstack([J11, J12]), hstack([J21, J22])], format="csr")
 
-    # ext2int renumbers buses consecutively but preserves original bus numbers
-    # in r['order']['bus']['i2e'].
     i2e = np.asarray(r["order"]["bus"]["i2e"]).astype(int)
     ext_to_int = {int(b): i for i, b in enumerate(i2e)}
     data_pos = {int(b): k for k, b in enumerate(bus_ids)}
@@ -147,13 +129,11 @@ def jacobian_direction(opf_result, direction, bus_ids, trigger_bus):
 
     rhs = np.r_[dP[pvpq], dQ[pq]]
     dx = spsolve(J, rhs)
-    dvm = dx[len(pvpq) :]
+    dvm = dx[len(pvpq):]
     pq_pos = {int(b): k for k, b in enumerate(pq)}
     ti = ext_to_int[int(trigger_bus)]
     dv = float(dvm[pq_pos[ti]]) if ti in pq_pos else np.nan
-
-    dense = J.toarray()
-    cond = float(np.linalg.cond(dense))
+    cond = float(np.linalg.cond(J.toarray()))
     return dv, cond, int(len(ref)), int(len(pv)), int(len(pq))
 
 
@@ -198,12 +178,10 @@ def main():
     bus_ids = te["bus_ids"].astype(int)
     cont = continuation_rows(data, te["x"].astype(np.float32))
     paths = sorted(set(r["path"] for r in cont))
-        case_path = load_config_case(Path(a.config))
+    case_path = load_config_case(Path(a.config))
     base_case = load_case(str(case_path))
     if not isinstance(base_case, dict):
-        raise RuntimeError(
-            f"Case loader returned {type(base_case).__name__}, expected dict: {case_path}"
-        )
+        raise RuntimeError(f"Case loader returned {type(base_case).__name__}, expected dict: {case_path}")
     opt = ppoption(VERBOSE=0, OUT_ALL=0)
 
     print("M12 AC-JACOBIAN / KKT BOUNDARY-SENSITIVITY AUDIT")
@@ -222,16 +200,12 @@ def main():
         vm, vmin = trigger_values(res, a.trigger_bus)
         margin = vm - vmin
         try:
-            dv, cond, nref, npv, npq = jacobian_direction(
-                res, q["direction"], bus_ids, a.trigger_bus
-            )
+            dv, cond, nref, npv, npq = jacobian_direction(res, q["direction"], bus_ids, a.trigger_bus)
         except Exception as e:
             failures += 1
             print(f" jacobian failure path={q['path']} lambda={q['lambda']:.6f}: {e}", flush=True)
             continue
 
-        # Predicted crossing under first-order local continuation.  Only a
-        # negative dV/dlambda means the current direction approaches Vmin.
         if np.isfinite(dv) and dv < -a.approach_eps:
             distance = margin / (-dv)
             hit = q["lambda"] + max(distance, 0.0)
@@ -239,32 +213,18 @@ def main():
             distance = np.inf
             hit = np.inf
 
-        # Evaluation-only dual: PYPOWER OPF appends MU_VMIN after the standard
-        # 13 bus columns.  idx_bus MU_VMIN is imported lazily for compatibility.
         from pypower.idx_bus import MU_VMIN
         bhit = np.where(np.rint(res["bus"][:, BUS_I]).astype(int) == a.trigger_bus)[0][0]
         mu = float(res["bus"][bhit, MU_VMIN]) if res["bus"].shape[1] > MU_VMIN else 0.0
 
-        out.append(
-            {
-                "path": q["path"],
-                "control": q["control"],
-                "lambda": q["lambda"],
-                "vm31": vm,
-                "vmin31": vmin,
-                "margin31": margin,
-                "dV31_dlambda": dv,
-                "distance_to_vmin_lambda": distance,
-                "predicted_lambda_hit": hit,
-                "jacobian_condition": cond,
-                "mu31_eval_only": mu,
-                "active_eval_only": int(mu > a.dual_tol),
-                "true_lmp_eval_only": q["true_lmp"],
-                "nref": nref,
-                "npv": npv,
-                "npq": npq,
-            }
-        )
+        out.append({
+            "path": q["path"], "control": q["control"], "lambda": q["lambda"],
+            "vm31": vm, "vmin31": vmin, "margin31": margin, "dV31_dlambda": dv,
+            "distance_to_vmin_lambda": distance, "predicted_lambda_hit": hit,
+            "jacobian_condition": cond, "mu31_eval_only": mu,
+            "active_eval_only": int(mu > a.dual_tol), "true_lmp_eval_only": q["true_lmp"],
+            "nref": nref, "npv": npv, "npq": npq,
+        })
         if k % 25 == 0:
             print(f" solved {k}/{len(cont)} failures={failures}", flush=True)
 
@@ -272,14 +232,7 @@ def main():
         raise RuntimeError("M12 produced no solved Jacobian points")
 
     print("\nPATHWISE BOUNDARY ANTICIPATION")
-    summary = {
-        "configuration": vars(a),
-        "case": str(case_path),
-        "n_requested": len(cont),
-        "n_solved": len(out),
-        "failures": failures,
-        "paths": {},
-    }
+    summary = {"configuration": vars(a), "case": str(case_path), "n_requested": len(cont), "n_solved": len(out), "failures": failures, "paths": {}}
     crossing_errors = []
     preactive_hit_errors = []
     for path in paths:
@@ -289,8 +242,6 @@ def main():
         true_hit = first_crossing(rr, "mu31_eval_only")
         pre = [r for r in rr if not np.isfinite(true_hit) or r["lambda"] < true_hit]
         finite = [r for r in pre if np.isfinite(r["predicted_lambda_hit"])]
-        # Last pre-activation prediction is the strictest prospective estimate:
-        # it uses only current state + known load direction, not future labels.
         last = finite[-1] if finite else None
         pred_hit = float(last["predicted_lambda_hit"]) if last else np.nan
         err = abs(pred_hit - true_hit) if np.isfinite(pred_hit) and np.isfinite(true_hit) else np.nan
@@ -299,41 +250,23 @@ def main():
         preactive_hit_errors.extend(all_pre_err)
         approaching = sum(r["dV31_dlambda"] < -a.approach_eps for r in pre)
         summary["paths"][str(path)] = {
-            "n": len(rr),
-            "true_activation_lambda": true_hit,
-            "last_preactive_predicted_lambda": pred_hit,
-            "last_preactive_abs_error": err,
-            "preactive_n": len(pre),
-            "preactive_approaching_fraction": approaching / max(len(pre), 1),
+            "n": len(rr), "true_activation_lambda": true_hit,
+            "last_preactive_predicted_lambda": pred_hit, "last_preactive_abs_error": err,
+            "preactive_n": len(pre), "preactive_approaching_fraction": approaching / max(len(pre), 1),
             "median_preactive_predicted_hit_abs_error": float(np.median(all_pre_err)) if all_pre_err else None,
             "max_jacobian_condition": float(np.max([r["jacobian_condition"] for r in rr])),
             "min_margin": float(np.min([r["margin31"] for r in rr])),
             "min_dV31_dlambda": float(np.min([r["dV31_dlambda"] for r in rr])),
         }
-        print(
-            f"path={path} true_hit={true_hit:.6f} last_pre_pred={pred_hit:.6f} "
-            f"abs_err={err:.6f} approaching={approaching}/{len(pre)} "
-            f"median_pre_err={np.median(all_pre_err) if all_pre_err else np.nan:.6f}"
-        )
+        print(f"path={path} true_hit={true_hit:.6f} last_pre_pred={pred_hit:.6f} abs_err={err:.6f} approaching={approaching}/{len(pre)} median_pre_err={np.median(all_pre_err) if all_pre_err else np.nan:.6f}")
 
-    # One-step voltage-margin prediction is an additional local linearization
-    # check and never uses a future point to construct the prediction itself.
     one_step = []
     for path in paths:
         rr = sorted([r for r in out if r["path"] == path], key=lambda z: z["lambda"])
         for left, right in zip(rr[:-1], rr[1:]):
             dl = right["lambda"] - left["lambda"]
             pred = left["margin31"] + left["dV31_dlambda"] * dl
-            one_step.append(
-                {
-                    "path": path,
-                    "lambda_left": left["lambda"],
-                    "lambda_right": right["lambda"],
-                    "pred_margin_right": pred,
-                    "true_margin_right": right["margin31"],
-                    "abs_error": abs(pred - right["margin31"]),
-                }
-            )
+            one_step.append({"path": path, "lambda_left": left["lambda"], "lambda_right": right["lambda"], "pred_margin_right": pred, "true_margin_right": right["margin31"], "abs_error": abs(pred - right["margin31"])})
     ose = np.array([r["abs_error"] for r in one_step], float)
     rng = np.random.default_rng(a.seed)
     summary["aggregate"] = {
@@ -368,13 +301,7 @@ def main():
     print(f"CSV output: {csvout}")
     print(f"One-step CSV: {stepout}")
     print(f"Summary: {jsout}")
-    print(
-        "Decision: small prospective boundary-location error across all frozen paths supports "
-        "an explicit Jacobian/KKT transition feature for M13. Large/path-specific error means "
-        "a single-point Newton Jacobian is insufficient and the next model must differentiate "
-        "the full OPF KKT system or use continuation-aware state information. Do not interpret "
-        "this audit as causal evidence."
-    )
+    print("Decision: small prospective boundary-location error across all frozen paths supports an explicit Jacobian/KKT transition feature for M13. Large/path-specific error means a single-point Newton Jacobian is insufficient and the next model must differentiate the full OPF KKT system or use continuation-aware state information. Do not interpret this audit as causal evidence.")
 
 
 if __name__ == "__main__":
