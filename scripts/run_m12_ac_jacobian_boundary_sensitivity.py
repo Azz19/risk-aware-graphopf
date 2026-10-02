@@ -198,12 +198,12 @@ def main():
     bus_ids = te["bus_ids"].astype(int)
     cont = continuation_rows(data, te["x"].astype(np.float32))
     paths = sorted(set(r["path"] for r in cont))
-    case_path = load_config_case(Path(a.config))
+        case_path = load_config_case(Path(a.config))
     base_case = load_case(str(case_path))
-        if not isinstance(base_case, dict):
-    raise RuntimeError(
-        f"Case loader returned {type(base_case).__name__}, expected dict: {case_path}"
-    )
+    if not isinstance(base_case, dict):
+        raise RuntimeError(
+            f"Case loader returned {type(base_case).__name__}, expected dict: {case_path}"
+        )
     opt = ppoption(VERBOSE=0, OUT_ALL=0)
 
     print("M12 AC-JACOBIAN / KKT BOUNDARY-SENSITIVITY AUDIT")
