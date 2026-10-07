@@ -105,9 +105,12 @@ def constraint_violations(ppc, state, temperature=40.0):
     lim=bus_generator_limits(ppc,device,dtype)
     vmin=torch.tensor(bus[:,VMIN],dtype=dtype,device=device); vmax=torch.tensor(bus[:,VMAX],dtype=dtype,device=device)
     vm=state["vm"]; pg=state["pg_bus_mw"]; qg=state["qg_bus_mvar"]
-    v=torch.maximum(smooth_positive(vm-vmax,temperature),smooth_positive(vmin-vm,temperature)).amax(1)
-    p=torch.maximum(smooth_positive(pg-lim["pmax"],temperature),smooth_positive(lim["pmin"]-pg,temperature))
-    q=torch.maximum(smooth_positive(qg-lim["qmax"],temperature),smooth_positive(lim["qmin"]-qg,temperature))
+    # Smooth the maximum of the two signed margins, then apply positive-part
+    # once. Applying softplus to each side separately gives every interior
+    # point a nonzero floor and can dominate the CVaR objective.
+    v=smooth_positive(torch.maximum(vm-vmax,vmin-vm),temperature).amax(1)
+    p=smooth_positive(torch.maximum(pg-lim["pmax"],lim["pmin"]-pg),temperature)
+    q=smooth_positive(torch.maximum(qg-lim["qmax"],lim["qmin"]-qg),temperature)
     mask=lim["count"]>0
     # Apparent-power branch loading using the same pi-model convention as Ybus.
     ids=bus[:,BUS_I].astype(int); lookup={b:i for i,b in enumerate(ids)}; base=float(ppc["baseMVA"])
@@ -123,7 +126,7 @@ def constraint_violations(ppc, state, temperature=40.0):
         If=yff*V[:,i]+yft*V[:,j]; It=ytf*V[:,i]+ytt*V[:,j]
         Sf=V[:,i]*torch.conj(If)*base; St=V[:,j]*torch.conj(It)*base
         ratios.append(torch.maximum(torch.abs(Sf),torch.abs(St))/float(br[RATE_A])-1.0)
-    thermal=(smooth_positive(torch.stack(ratios,1),temperature).amax(1)
+    thermal=(smooth_positive(torch.stack(ratios,1).amax(1),temperature)
              if ratios else torch.zeros(vm.shape[0],dtype=dtype,device=device))
     return {"voltage":v,"pg":p[:,mask].amax(1),"qg":q[:,mask].amax(1),
             "thermal":thermal,"balance":state["max_balance_residual_pu"]}
