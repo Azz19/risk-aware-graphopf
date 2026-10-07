@@ -118,6 +118,24 @@ def to_pf_base(case,controls):
     return out,ga
 
 
+def zero_error_audit(cfg,model,t,case,rb,fc):
+    """Authoritative guardrail: learned nominal controls must be feasible before stochastic evaluation."""
+    tol=float(cfg["experiment"]["feasibility_tolerance"])
+    ctl=policy_controls(model,t,case); base,alpha=to_pf_base(case,ctl)
+    res,ok=run_pf_scenario(apply_scenario(base,rb,fc,np.zeros_like(fc),alpha))
+    if not ok:
+        return {"pf_converged":False,"operational_feasible":False}
+    m=evaluate_constraints(res,tol)
+    return {"pf_converged":True,**m}
+
+
+def controls_audit(model,t,case):
+    ctl=policy_controls(model,t,case)
+    pg=ctl["pg_bus"].detach().cpu().numpy(); vg=ctl["vg_bus"].detach().cpu().numpy()
+    alpha=ctl["alpha_bus"].detach().cpu().numpy()
+    return {"pg_bus_mw":pg.tolist(),"vg_bus_pu":vg.tolist(),"alpha_bus":alpha.tolist()}
+
+
 def authoritative_eval(cfg,model,t,case,rb,fc,corr,seed,n,family,save_path=None):
     tol=float(cfg["experiment"]["feasibility_tolerance"]); conf=float(cfg["experiment"]["confidence_level"])
     ctl=policy_controls(model,t,case); base,alpha=to_pf_base(case,ctl)
@@ -157,14 +175,20 @@ def main():
     for seed in cfg["model"]["seeds"]:
         for mult in cfg["training"]["risk_multipliers"]:
             model,tag=train_one(cfg,mult,int(seed),case,rb,fc,corr,base,t,out); models[tag]=model
+            zero=zero_error_audit(cfg,model,t,case,rb,fc)
+            (out/f"{tag}_controls.json").write_text(json.dumps({
+                "zero_error_audit":zero,"controls":controls_audit(model,t,case)},indent=2)+"\n")
             cal=authoritative_eval(cfg,model,t,case,rb,fc,corr,int(cfg["uncertainty"]["calibration_seed"]),
                 int(cfg["uncertainty"]["calibration_scenarios"]),cfg["uncertainty"]["train_family"])
-            records.append({"tag":tag,"seed":seed,"risk_multiplier":mult,**cal})
+            records.append({"tag":tag,"seed":seed,"risk_multiplier":mult,
+                "zero_error_feasible":bool(zero.get("operational_feasible",False)),**cal})
             pd.DataFrame(records).to_csv(out/"calibration.csv",index=False)
     frame=pd.DataFrame(records)
-    eligible=frame[frame["meets_5pct_upper_ci"]]
+    eligible=frame[frame["meets_5pct_upper_ci"] & frame["zero_error_feasible"]]
     if eligible.empty:
-        selected=frame.sort_values(["joint_ci_high","risk_multiplier"]).iloc[0]; status="CALIBRATION_TARGET_NOT_ATTAINED"
+        selected=frame.sort_values(["zero_error_feasible","joint_ci_high","risk_multiplier"],
+                                   ascending=[False,True,True]).iloc[0]
+        status="CALIBRATION_TARGET_NOT_ATTAINED"
     else:
         selected=eligible.sort_values(["risk_multiplier","joint_ci_high"]).iloc[0]; status="CALIBRATION_TARGET_ATTAINED"
     tag=str(selected["tag"]); model=models[tag]
@@ -173,6 +197,7 @@ def main():
     summary={"status":status,"selected":selected.to_dict(),"test":test,"device":str(device),
         "base_opf_cost":base,"renewable_buses":rb.tolist(),"renewable_forecast_mw":fc.tolist(),
         "protocol":"selection uses calibration only; test touched once after frozen selection",
+        "selected_zero_error_audit":zero_error_audit(cfg,model,t,case,rb,fc),
         "claim_supported":bool(test["meets_5pct_upper_ci"])}
     (out/"summary.json").write_text(json.dumps(summary,indent=2,default=str)+"\n")
     print("\nR1 FINAL\n"+json.dumps(summary,indent=2,default=str))
