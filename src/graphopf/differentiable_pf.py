@@ -70,7 +70,7 @@ def solve_power_flow(ppc, pg_bus_mw, vg_bus, renewable_mw, renewable_buses,
     """
     device=pg_bus_mw.device; dtype=pg_bus_mw.dtype; base=float(ppc["baseMVA"])
     bus=ppc["bus"]; n=len(bus); ids=bus[:,BUS_I].astype(int); lu={b:i for i,b in enumerate(ids)}
-    typ=bus[:,BUS_TYPE].astype(int); ref=np.where(typ==REF)[0]; pq=np.where(typ!=REF)[0]
+    typ=bus[:,BUS_TYPE].astype(int); ref=np.where(typ==REF)[0]; pq=np.where(typ==1)[0]
     if len(ref)!=1: raise ValueError("R1 currently requires one reference bus")
     nonref=np.where(np.arange(n)!=ref[0])[0]
     nonref=torch.tensor(nonref,dtype=torch.long,device=device); pq=torch.tensor(pq,dtype=torch.long,device=device)
@@ -109,5 +109,21 @@ def constraint_violations(ppc, state, temperature=40.0):
     p=torch.maximum(smooth_positive(pg-lim["pmax"],temperature),smooth_positive(lim["pmin"]-pg,temperature))
     q=torch.maximum(smooth_positive(qg-lim["qmax"],temperature),smooth_positive(lim["qmin"]-qg,temperature))
     mask=lim["count"]>0
+    # Apparent-power branch loading using the same pi-model convention as Ybus.
+    ids=bus[:,BUS_I].astype(int); lookup={b:i for i,b in enumerate(ids)}; base=float(ppc["baseMVA"])
+    V=vm*torch.exp(1j*state["va"]); ratios=[]
+    for br in ppc["branch"]:
+        if br[BR_STATUS] <= 0 or br[RATE_A] <= 0: continue
+        i,j=lookup[int(br[F_BUS])],lookup[int(br[T_BUS])]
+        y=1/complex(br[BR_R],br[BR_X]); bc=1j*br[BR_B]/2
+        tap=br[TAP] if br[TAP] else 1.0; t=tap*np.exp(1j*np.deg2rad(br[SHIFT]))
+        yff=(y+bc)/(abs(t)**2); yft=-y/np.conj(t); ytt=y+bc; ytf=-y/t
+        yff=torch.tensor(yff,dtype=V.dtype,device=device); yft=torch.tensor(yft,dtype=V.dtype,device=device)
+        ytt=torch.tensor(ytt,dtype=V.dtype,device=device); ytf=torch.tensor(ytf,dtype=V.dtype,device=device)
+        If=yff*V[:,i]+yft*V[:,j]; It=ytf*V[:,i]+ytt*V[:,j]
+        Sf=V[:,i]*torch.conj(If)*base; St=V[:,j]*torch.conj(It)*base
+        ratios.append(torch.maximum(torch.abs(Sf),torch.abs(St))/float(br[RATE_A])-1.0)
+    thermal=(smooth_positive(torch.stack(ratios,1),temperature).amax(1)
+             if ratios else torch.zeros(vm.shape[0],dtype=dtype,device=device))
     return {"voltage":v,"pg":p[:,mask].amax(1),"qg":q[:,mask].amax(1),
-            "balance":state["max_balance_residual_pu"]}
+            "thermal":thermal,"balance":state["max_balance_residual_pu"]}
