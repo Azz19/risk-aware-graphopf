@@ -82,11 +82,17 @@ def train_one(cfg,mult,seed,case,rb,fc,corr,base,t,outdir):
         order=rng.permutation(len(E)); losses=[]
         for start in range(0,len(E),bs):
             e=torch.tensor(E[order[start:start+bs]],dtype=torch.float64,device=device)
-            ctl=policy_controls(model,t,case); mismatch=e.sum(1)
+            ctl=policy_controls(model,t,case)
+            forecast_t=torch.tensor(fc,dtype=torch.float64,device=device)
+            realized=torch.clamp(forecast_t+e,min=0)
+            effective_error=realized-forecast_t
+            mismatch=effective_error.sum(1)
             pg=ctl["pg_bus"].unsqueeze(0)-mismatch.unsqueeze(1)*ctl["alpha_bus"].unsqueeze(0)
             vg=ctl["vg_bus"].unsqueeze(0).expand(len(e),-1)
-            realized=torch.clamp(torch.tensor(fc,dtype=torch.float64,device=device)+e,min=0)
-            st=solve_power_flow(case,pg,vg,realized,rb)
+            # 'case' already has the renewable forecast subtracted from PD.
+            # The differentiable PF therefore receives only the realized
+            # forecast error, exactly matching experiments.apply_scenario.
+            st=solve_power_flow(case,pg,vg,effective_error,rb)
             v=constraint_violations(case,st,temp)
             vn={"voltage":v["voltage"],"pg":v["pg"]/bM,"qg":v["qg"]/bM,
                 "thermal":v["thermal"],"balance":v["balance"]}
