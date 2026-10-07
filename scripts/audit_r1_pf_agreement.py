@@ -14,7 +14,9 @@ from graphopf.powerflow import load_case, solve_ac_opf, evaluate_constraints
 from graphopf.experiments import select_renewable_buses, renewable_forecast, apply_scenario, run_pf_scenario
 from graphopf.differentiable_pf import solve_power_flow, constraint_violations, bus_generator_limits
 from graphopf.risk_aware_model import RiskAwareGraphOPF
-from scripts.run_r1_risk_aware_calibration import setup, policy_controls, to_pf_base
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_r1_risk_aware_calibration import setup, policy_controls, to_pf_base
 
 
 def main():
