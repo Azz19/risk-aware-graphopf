@@ -6,12 +6,12 @@ paper's intended risk-aware Lagrangian-dual formulation; it does not alter the
 frozen paper protocol or touch held-out test data.
 """
 from __future__ import annotations
-import argparse, random, sys
+import argparse, json, random, sys
 from pathlib import Path
 import numpy as np, pandas as pd, torch, yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_r1_risk_aware_calibration import setup, errors, policy_controls, generation_cost
+from run_r1_risk_aware_calibration import setup, errors, policy_controls, generation_cost, authoritative_eval, zero_error_audit
 from graphopf.differentiable_pf import solve_power_flow, constraint_violations
 from graphopf.risk import empirical_cvar
 from graphopf.risk_aware_model import RiskAwareGraphOPF
@@ -97,7 +97,22 @@ def main():
     df=pd.DataFrame(rows); df.to_csv(out/"r1_adaptive_dual_dynamics.csv",index=False)
     torch.save({"state":model.state_dict(),"lambdas":lam,"seed":seed},
                out/"r1_adaptive_dual_model.pt")
+
+    # Training-only diagnostic gets an independent validation draw, not the
+    # frozen R1 calibration or test seeds. This determines whether the adaptive
+    # dual idea is worth promoting into the paper protocol.
+    diag_seed=int(cfg["uncertainty"]["train_seed"])+991
+    diag_n=1000
+    zero=zero_error_audit(cfg,model,t,case,rb,fc)
+    val=authoritative_eval(cfg,model,t,case,rb,fc,corr,diag_seed,diag_n,
+                           cfg["uncertainty"]["train_family"],
+                           out/"r1_adaptive_dual_validation_scenarios.csv")
+    summary={"training_final":rows[-1],"lambdas":lam,
+             "zero_error_audit":zero,"diagnostic_validation":val,
+             "diagnostic_seed":diag_seed,
+             "note":"Diagnostic validation only; frozen R1 calibration/test remain untouched."}
+    (out/"r1_adaptive_dual_summary.json").write_text(json.dumps(summary,indent=2,default=str)+"\n")
     print("\nR1 ADAPTIVE DUAL FINAL")
-    print(df.tail(1).to_string(index=False))
+    print(json.dumps(summary,indent=2,default=str))
 
 if __name__=="__main__": main()
