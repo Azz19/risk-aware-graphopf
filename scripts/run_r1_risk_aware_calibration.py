@@ -176,7 +176,10 @@ def main():
     raw,case,ref,rb,fc,corr,base,t=setup(cfg,device)
     if args.smoke:
         cfg["uncertainty"]["train_scenarios"]=256; cfg["uncertainty"]["calibration_scenarios"]=200; cfg["uncertainty"]["test_scenarios"]=200
-        cfg["training"]["epochs"]=2; cfg["training"]["risk_multipliers"]=[1.0]; cfg["model"]["seeds"]=cfg["model"]["seeds"][:1]
+        # Smoke is a pipeline check, but it must train long enough to reveal
+        # whether the unsupervised objective can move toward nominal feasibility.
+        cfg["training"]["epochs"]=40; cfg["training"]["patience"]=15
+        cfg["training"]["risk_multipliers"]=[10.0]; cfg["model"]["seeds"]=cfg["model"]["seeds"][:1]
     records=[]; models={}
     for seed in cfg["model"]["seeds"]:
         for mult in cfg["training"]["risk_multipliers"]:
