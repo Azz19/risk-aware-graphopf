@@ -185,7 +185,7 @@ def main():
     summary={'configuration':vars(a),'case':str(case_path),'n_requested':len(cont),'n_solved':len(out),'failures':failures,'paths':{}}
     last_errors=[]; all_pre_errors=[]; increment_errors=[]
     for path in paths:
-        rr=sorted([r for r in out if r['path']==path],key=lambda z:z['lambda_']); true_hit=first_active([dict(lambda=r['lambda_'],mu=r['mu']) for r in rr],a.dual_tol)
+        rr=sorted([r for r in out if r['path']==path],key=lambda z:z['lambda_']); true_hit=first_active([{'lambda': r['lambda_'], 'mu': r['mu']} for r in rr],a.dual_tol)
         pre=[r for r in rr if np.isfinite(true_hit) and r['lambda_']<true_hit]
         finite=[r for r in pre if np.isfinite(r['predicted_hit_margin'])]
         last=finite[-1] if finite else None; pred=float(last['predicted_hit_margin']) if last else np.nan
