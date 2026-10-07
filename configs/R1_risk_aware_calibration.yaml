@@ -1,0 +1,61 @@
+# R1: research-grade calibration block for the original Risk-Aware GraphOPF claim.
+#
+# This configuration deliberately separates TRAIN/CALIBRATION/TEST randomness.
+# The untouched paper test is 20,000 scenarios.  Non-convergence counts as a
+# joint failure.  Selection is calibration-only; test results never select a model.
+experiment:
+  id: R1_risk_aware_calibration
+  output_dir: results/R1_risk_aware_calibration
+  target_epsilon: 0.05
+  confidence_level: 0.95
+  feasibility_tolerance: 1.0e-6
+
+case:
+  name: pglib_opf_case57_ieee
+  path: pglib-opf/pglib_opf_case57_ieee.m
+
+renewables:
+  penetration: 0.20
+  n_sites: 6
+  placement: highest_load_buses
+
+uncertainty:
+  train_family: corr_student_t
+  relative_sigma: 0.15
+  student_df: 5
+  correlation_length: 2.0
+  train_seed: 20271020
+  calibration_seed: 20271021
+  test_seed: 20271022
+  train_scenarios: 4096
+  calibration_scenarios: 5000
+  test_scenarios: 20000
+
+model:
+  hidden_dim: 128
+  message_passing_layers: 4
+  dropout: 0.0
+  seeds: [20271101, 20271102, 20271103]
+
+training:
+  epochs: 400
+  batch_size: 256
+  learning_rate: 5.0e-4
+  weight_decay: 1.0e-6
+  patience: 60
+  cvar_alpha: 0.95
+  # Pre-declared multiplier sweep; calibration, never test, selects among these.
+  risk_multipliers: [1.0, 3.0, 10.0, 30.0, 100.0]
+  # Smooth differentiable proxy temperature used during training only.
+  softplus_temperature: 40.0
+  nominal_cost_weight: 1.0
+  pg_weight: 1.0
+  qg_weight: 1.0
+  voltage_weight: 1.0
+  thermal_weight: 1.0
+
+evaluation:
+  require_upper_ci: true
+  count_pf_nonconvergence_as_violation: true
+  save_scenario_level_test: true
+  report_tail_quantiles: [0.90, 0.95, 0.99]
