@@ -64,6 +64,6 @@ def main():
     summary={"zero_error_audit":z,"diagnostic_validation":val,"diagnostic_seed":diag_seed,
              "risk_weight":args.risk_weight,"epochs":args.epochs,
              "note":"Diagnostic only; frozen calibration/test remain untouched."}
-    (out/"r1_pretrain_risk_summary.json").write_text(json.dumps(summary,indent=2)+"\n")
-    print("\nR1 PRETRAIN -> RISK FINAL\n"+json.dumps(summary,indent=2))
+    (out/"r1_pretrain_risk_summary.json").write_text(json.dumps(summary,indent=2,default=lambda v: v.item() if isinstance(v,np.generic) else str(v))+"\n")
+    print("\nR1 PRETRAIN -> RISK FINAL\n"+json.dumps(summary,indent=2,default=lambda v: v.item() if isinstance(v,np.generic) else str(v)))
 if __name__=="__main__": main()
