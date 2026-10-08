@@ -1,7 +1,9 @@
 """Risk-aware heterogeneous graph policy for unsupervised AC-OPF.
 
-The policy consumes only exogenous/static bus information.  It predicts active
+The policy consumes only exogenous/static bus information. It predicts active
 generation, generator-voltage setpoints, and nonnegative AGC participation.
+Fixed-range generators are excluded from AGC participation by construction:
+a unit with PMAX == PMIN has zero physical active-power recourse capability.
 No OPF solution labels are used by this module.
 """
 from __future__ import annotations
@@ -25,6 +27,12 @@ class RiskAwareGraphOPF(nn.Module):
         mask = gen_mask.to(dtype=x.dtype).unsqueeze(0)
         pg = pmin + (pmax - pmin) * torch.sigmoid(raw[..., 0])
         vg = vmin + (vmax - vmin) * torch.sigmoid(raw[..., 1])
-        logits = raw[..., 2].masked_fill(~gen_mask.unsqueeze(0), -1e9)
-        alpha = torch.softmax(logits, dim=1) * mask
+
+        # Only generators with nonzero active-power range can provide AGC
+        # recourse. This structural mask prevents zero-range units from being
+        # moved away from their mandatory PG setpoint under any nonzero mismatch.
+        flexible = gen_mask & ((pmax - pmin) > 1e-9)
+        flex_mask = flexible.to(dtype=x.dtype).unsqueeze(0)
+        logits = raw[..., 2].masked_fill(~flexible.unsqueeze(0), -1e9)
+        alpha = torch.softmax(logits, dim=1) * flex_mask
         return {"pg_bus": pg * mask, "vg_bus": vg, "alpha_bus": alpha}
